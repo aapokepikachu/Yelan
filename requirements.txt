@@ -1,4 +1,4 @@
-aiogram
-fastapi
-uvicorn
-pymongo
+aiogram==3.0.0
+pymongo[srv]==4.3.3
+fastapi==0.100.0
+uvicorn==0.23.0
