@@ -170,10 +170,14 @@ async def start_bot():
 
 # 🚀 MAIN FUNCTION TO RUN BOT & FASTAPI TOGETHER
 async def main():
-    bot_task = asyncio.create_task(start_bot())
-    server_task = asyncio.create_task(uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)), loop="asyncio"))
+    bot_task = asyncio.create_task(start_bot())  
 
-    await asyncio.gather(bot_task, server_task)
+    # ✅ Correct way to run FastAPI inside an async event loop
+    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))  
+    server = uvicorn.Server(config)  
+    server_task = asyncio.create_task(server.serve())  
+
+    await asyncio.gather(bot_task, server_task)  
 
 if __name__ == "__main__":
     asyncio.run(main())  # ✅ Runs everything properly
