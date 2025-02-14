@@ -5,6 +5,8 @@ import pymongo
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
+from fastapi import FastAPI
+import uvicorn
 from datetime import datetime, timedelta
 
 # Load environment variables
@@ -30,6 +32,13 @@ logging.basicConfig(level=logging.INFO)
 
 # Cooldown storage
 user_cooldowns = {}
+
+# FastAPI for Render Web Service
+app = FastAPI()
+
+@app.get("/")
+def home():
+    return {"status": "Yelan Bot is Running!"}
 
 # 🏁 START COMMAND
 @dp.message_handler(commands=["start"])
@@ -148,7 +157,13 @@ async def mystery_command(message: types.Message):
 async def shinyhunt_command(message: types.Message):
     await message.reply("✨ You found a Shiny Pokémon! [🔗 View Here](https://www.pokemon.com/us)")
 
-# 🚀 RUN BOT
+# 🚀 ASYNC FUNCTION TO START TELEGRAM BOT
+async def start_bot():
+    logging.info("Starting Telegram bot...")
+    await dp.start_polling()
+
+# 🚀 RUN BOT WITH FASTAPI FOR RENDER
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(dp.start_polling())
+    loop.create_task(start_bot())
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
