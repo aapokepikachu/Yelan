@@ -97,7 +97,7 @@ async def about_callback(callback: types.CallbackQuery):
 async def back_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(await start_message(), reply_markup=main_menu())
 
-# /find command (optimized)
+# /find command
 @dp.message(F.text.startswith("/find"))
 async def find_rom(message: types.Message):
     query = message.text.replace("/find", "").strip().lower()
