@@ -172,5 +172,9 @@ async def main():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))  # Fix for Render deployment
-    asyncio.create_task(main())
-    uvicorn.run(app, host="0.0.0.0", port=port)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.create_task(main())  # Correctly schedules the bot's async task
+    uvicorn.run(app, host="0.0.0.0", port=port)  # Runs FastAPI properly
