@@ -4,7 +4,6 @@ import asyncio
 import pymongo
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
 from fastapi import FastAPI
 import uvicorn
 from datetime import datetime, timedelta
@@ -30,7 +29,7 @@ search_collection = db["search_logs"]
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# Cooldown storage
+# Cooldown storage for requests
 user_cooldowns = {}
 
 # FastAPI for Render Web Service
@@ -48,9 +47,11 @@ async def start_command(message: types.Message):
         InlineKeyboardButton("Help ℹ️", callback_data="help"),
         InlineKeyboardButton("About Me 🤗", callback_data="about")
     )
-    await message.answer(f"👋 Hello {message.from_user.first_name}! I'm Yelan, your Pokémon ROM Finder! 🎮\n\n"
-                         "Use /find <ROM Name> to search for a ROM or press 'Help ℹ️' to see my commands.", 
-                         reply_markup=buttons)
+    await message.answer(
+        f"👋 Hello {message.from_user.first_name}! I'm Yelan, your Pokémon ROM Finder! 🎮\n\n"
+        "Use `/find <ROM Name>` to search for a ROM or press 'Help ℹ️' to see my commands.", 
+        reply_markup=buttons
+    )
 
 # ℹ️ HELP BUTTON HANDLER
 @dp.callback_query_handler(lambda c: c.data == "help")
@@ -107,7 +108,11 @@ async def request_rom(message: types.Message):
         return
 
     user_cooldowns[user_id] = datetime.now()
-    requests_collection.insert_one({"user_id": user_id, "username": message.from_user.username, "date": datetime.now()})
+    requests_collection.insert_one({
+        "user_id": user_id, 
+        "username": message.from_user.username, 
+        "date": datetime.now()
+    })
     await bot.send_message(ADMIN_GROUP_ID, f"📩 **New ROM Request!**\n👤 User: @{message.from_user.username}")
     await message.reply("📨 ROM request sent to admins! Please wait for approval.")
 
@@ -162,8 +167,15 @@ async def start_bot():
     logging.info("Starting Telegram bot...")
     await dp.start_polling()
 
-# 🚀 RUN BOT WITH FASTAPI FOR RENDER
+# 🚀 MAIN FUNCTION TO RUN BOTH FASTAPI & TELEGRAM BOT
+async def main():
+    # Start both FastAPI (for Render) and Telegram bot
+    bot_task = asyncio.create_task(start_bot())
+    web_task = asyncio.create_task(uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080))))
+    
+    # Run both tasks
+    await asyncio.gather(bot_task, web_task)
+
+# 🚀 START THE BOT
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_bot())
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    asyncio.run(main())
