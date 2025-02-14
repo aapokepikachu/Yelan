@@ -38,7 +38,7 @@ user_cooldowns = {}
 app = FastAPI()
 
 @app.get("/")
-def home():
+async def home():
     return {"status": "Yelan Bot is Running!"}
 
 # 🏁 START COMMAND
@@ -163,7 +163,10 @@ async def shinyhunt_command(message: types.Message):
 # 🚀 ASYNC FUNCTION TO START TELEGRAM BOT
 async def start_bot():
     logging.info("Starting Telegram bot...")
-    await dp.start_polling()
+    try:
+        await dp.start_polling()
+    finally:
+        await bot.session.close()  # ✅ Fix for unclosed client session
 
 # 🚀 MAIN FUNCTION TO RUN BOT & FASTAPI TOGETHER
 async def main():
@@ -173,4 +176,4 @@ async def main():
     await asyncio.gather(bot_task, server_task)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main())  # ✅ Runs everything properly
