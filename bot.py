@@ -97,7 +97,7 @@ async def about_callback(callback: types.CallbackQuery):
 async def back_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(await start_message(), reply_markup=main_menu())
 
-# /find command (search all 7 channels for matching file captions)
+# /find command (optimized)
 @dp.message(F.text.startswith("/find"))
 async def find_rom(message: types.Message):
     query = message.text.replace("/find", "").strip().lower()
@@ -107,12 +107,14 @@ async def find_rom(message: types.Message):
 
     found_results = []
     for channel_id in CHANNEL_IDS:
-        async for msg in bot.get_chat_history(channel_id, limit=50):
+        async for msg in bot.get_chat_history(channel_id, limit=200):
             if msg.caption and query in msg.caption.lower():
-                found_results.append(f"📂 {msg.caption}\n🔗 [Download Link]({msg.link})")
+                link = f"https://t.me/c/{str(channel_id)[4:]}/{msg.message_id}"
+                found_results.append(f"📂 {msg.caption}\n🔗 [Download Here]({link})")
 
     if found_results:
         await message.reply("\n\n".join(found_results[:5]), disable_web_page_preview=True)
+        search_collection.insert_one({"query": query, "timestamp": datetime.utcnow()})
     else:
         await message.reply(f"❌ No results found for '{query}'. Try /request to ask admins.")
 
@@ -137,13 +139,12 @@ async def latest_uploads(message: types.Message):
     uploads = []
     for channel_id in CHANNEL_IDS:
         async for msg in bot.get_chat_history(channel_id, limit=5):
-            uploads.append(f"📂 {msg.caption}\n🔗 [Download]({msg.link})")
-        if uploads:
-            break
+            link = f"https://t.me/c/{str(channel_id)[4:]}/{msg.message_id}"
+            uploads.append(f"📂 {msg.caption}\n🔗 [Download]({link})")
 
     await message.reply("\n\n".join(uploads) if uploads else "🚨 No latest uploads found.")
 
-# /trending command (tracks most searched/downloaded ROMs)
+# /trending command
 @dp.message(F.text.startswith("/trending"))
 async def trending_roms(message: types.Message):
     trends = search_collection.aggregate([
@@ -154,7 +155,7 @@ async def trending_roms(message: types.Message):
     result = "\n".join([f"🔥 {t['_id']} - {t['count']} searches" for t in trends])
     await message.reply(f"📊 Trending ROMs:\n\n{result if result else 'No trends yet!'}")
 
-# /featured command (manual list of featured ROMs)
+# /featured command
 @dp.message(F.text.startswith("/featured"))
 async def featured_roms(message: types.Message):
     featured_list = [
@@ -164,10 +165,10 @@ async def featured_roms(message: types.Message):
     ]
     await message.reply("\n".join(featured_list), disable_web_page_preview=True)
 
-# /help_link command (returns direct links to commands)
-@dp.message(F.text.startswith("/help_link"))
-async def help_link_command(message: types.Message):
-    await message.reply("🔗 Direct Commands:\n"
+# /help command
+@dp.message(F.text.startswith("/help"))
+async def help_command(message: types.Message):
+    await message.reply("🔗 Command Links:\n"
                         "/find - Search ROMs\n"
                         "/request - Request ROMs\n"
                         "/latest - Latest uploads\n"
@@ -179,6 +180,7 @@ async def help_link_command(message: types.Message):
 
 # Start the bot
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
