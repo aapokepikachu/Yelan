@@ -165,23 +165,12 @@ async def featured_roms(message: types.Message):
     ]
     await message.reply("\n".join(featured_list), disable_web_page_preview=True)
 
-# /help command
-@dp.message(F.text.startswith("/help"))
-async def help_command(message: types.Message):
-    await message.reply("🔗 Command Links:\n"
-                        "/find - Search ROMs\n"
-                        "/request - Request ROMs\n"
-                        "/latest - Latest uploads\n"
-                        "/featured - Featured ROMs\n"
-                        "/trending - Trending ROMs\n"
-                        "/ping - Bot Status\n"
-                        "/mystery - Fun Facts\n"
-                        "/shinyhunt - Shiny Hunt")
-
 # Start the bot
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    port = int(os.getenv("PORT", 8000))  # Fix for Render deployment
+    asyncio.create_task(main())
+    uvicorn.run(app, host="0.0.0.0", port=port)
