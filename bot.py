@@ -4,6 +4,7 @@ import asyncio
 import pymongo
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from fastapi import FastAPI
 import uvicorn
 from datetime import datetime, timedelta
@@ -16,9 +17,10 @@ MONGO_URI = os.getenv("MONGO_URI")
 ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID"))
 CHANNEL_IDS = os.getenv("CHANNEL_IDS").split(',')
 
-# Initialize bot & dispatcher
+# Initialize bot, dispatcher & storage
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
 # Connect to MongoDB
 client = pymongo.MongoClient(MONGO_URI)
@@ -29,7 +31,7 @@ search_collection = db["search_logs"]
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# Cooldown storage for requests
+# Cooldown storage
 user_cooldowns = {}
 
 # FastAPI for Render Web Service
@@ -49,7 +51,7 @@ async def start_command(message: types.Message):
     )
     await message.answer(
         f"👋 Hello {message.from_user.first_name}! I'm Yelan, your Pokémon ROM Finder! 🎮\n\n"
-        "Use `/find <ROM Name>` to search for a ROM or press 'Help ℹ️' to see my commands.", 
+        "Use /find <ROM Name> to search for a ROM or press 'Help ℹ️' to see my commands.",
         reply_markup=buttons
     )
 
@@ -57,7 +59,7 @@ async def start_command(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "help")
 async def help_callback(callback_query: types.CallbackQuery):
     await callback_query.message.answer(
-        "📌 **Commands List:**\n"
+        "📌 Commands List:\n"
         "/find <ROM Name> - Search for a ROM\n"
         "/request - Request a ROM (24h cooldown) ⏳\n"
         "/latest - View latest uploads 📥\n"
@@ -73,9 +75,9 @@ async def help_callback(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "about")
 async def about_callback(callback_query: types.CallbackQuery):
     await callback_query.message.answer(
-        "👤 **Owner:** @AAPoke\n"
-        "🛠 **Creator:** @PokemonBots\n"
-        "💰 **Monetization:** @PokemonNdsGba"
+        "👤 Owner: @AAPoke\n"
+        "🛠 Creator: @PokemonBots\n"
+        "💰 Monetization: @PokemonNdsGba"
     )
 
 # 🔍 FIND COMMAND
@@ -83,19 +85,19 @@ async def about_callback(callback_query: types.CallbackQuery):
 async def find_rom(message: types.Message):
     query = message.text.replace("/find", "").strip()
     if not query:
-        await message.reply("⚠️ Please provide a ROM name. Example: `/find Pokémon Emerald`")
+        await message.reply("⚠️ Please provide a ROM name. Example: /find Pokémon Emerald")
         return
 
     found = False
     for channel_id in CHANNEL_IDS:
         async for msg in bot.iter_history(int(channel_id), limit=50):
             if query.lower() in msg.text.lower():
-                await message.reply(f"✅ ROM Found!\n\n📂 **{msg.text}**\n🔗 [Download Link]({msg.link})")
+                await message.reply(f"✅ ROM Found!\n\n📂 {msg.text}\n🔗 Download Link")
                 found = True
                 break
 
     if not found:
-        await message.reply(f"❌ No results found for '{query}'. Try `/request` to ask admins.")
+        await message.reply(f"❌ No results found for '{query}'. Try /request to ask admins.")
 
 # 📩 REQUEST COMMAND (WITH 24H COOLDOWN)
 @dp.message_handler(commands=["request"])
@@ -108,12 +110,8 @@ async def request_rom(message: types.Message):
         return
 
     user_cooldowns[user_id] = datetime.now()
-    requests_collection.insert_one({
-        "user_id": user_id, 
-        "username": message.from_user.username, 
-        "date": datetime.now()
-    })
-    await bot.send_message(ADMIN_GROUP_ID, f"📩 **New ROM Request!**\n👤 User: @{message.from_user.username}")
+    requests_collection.insert_one({"user_id": user_id, "username": message.from_user.username, "date": datetime.now()})
+    await bot.send_message(ADMIN_GROUP_ID, f"📩 New ROM Request!\n👤 User: @{message.from_user.username}")
     await message.reply("📨 ROM request sent to admins! Please wait for approval.")
 
 # 📥 LATEST UPLOADS
@@ -122,7 +120,7 @@ async def latest_uploads(message: types.Message):
     uploads = []
     for channel_id in CHANNEL_IDS:
         async for msg in bot.iter_history(int(channel_id), limit=5):
-            uploads.append(f"📂 {msg.text}\n🔗 [Download]({msg.link})")
+            uploads.append(f"📂 {msg.text}\n🔗 Download")
         if uploads:
             break
 
@@ -140,7 +138,7 @@ async def trending_roms(message: types.Message):
         {"$limit": 5}
     ])
     result = "\n".join([f"🔥 {t['_id']} - {t['count']} searches" for t in trends])
-    await message.reply(f"📊 **Trending ROMs:**\n\n{result if result else 'No trends yet!'}")
+    await message.reply(f"📊 Trending ROMs:\n\n{result if result else 'No trends yet!'}")
 
 # 🛠 PING COMMAND
 @dp.message_handler(commands=["ping"])
@@ -160,22 +158,19 @@ async def mystery_command(message: types.Message):
 # ✨ SHINY HUNT COMMAND
 @dp.message_handler(commands=["shinyhunt"])
 async def shinyhunt_command(message: types.Message):
-    await message.reply("✨ You found a Shiny Pokémon! [🔗 View Here](https://www.pokemon.com/us)")
+    await message.reply("✨ You found a Shiny Pokémon! 🔗 View Here")
 
 # 🚀 ASYNC FUNCTION TO START TELEGRAM BOT
 async def start_bot():
     logging.info("Starting Telegram bot...")
     await dp.start_polling()
 
-# 🚀 MAIN FUNCTION TO RUN BOTH FASTAPI & TELEGRAM BOT
+# 🚀 MAIN FUNCTION TO RUN BOT & FASTAPI TOGETHER
 async def main():
-    # Start both FastAPI (for Render) and Telegram bot
     bot_task = asyncio.create_task(start_bot())
-    web_task = asyncio.create_task(uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080))))
-    
-    # Run both tasks
-    await asyncio.gather(bot_task, web_task)
+    server_task = asyncio.create_task(uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)), loop="asyncio"))
 
-# 🚀 START THE BOT
+    await asyncio.gather(bot_task, server_task)
+
 if __name__ == "__main__":
     asyncio.run(main())
