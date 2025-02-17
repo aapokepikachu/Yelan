@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 from aiohttp import web
-from aiogram.webhook.aiohttp import WebhookRequestHandler  # Import WebhookRequestHandler
 
 load_dotenv()
 
@@ -17,7 +16,7 @@ GROUP_A_CHAT_ID = os.getenv("GROUP_A_CHAT_ID")
 MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
 # Connect to MongoDB using the connection string (if you're using MongoDB Atlas, this will include 'mongodb+srv' in the URI)
 client = pymongo.MongoClient(MONGO_URI)
@@ -218,10 +217,7 @@ if __name__ == '__main__':
     # Set up the webhook URL for Render
     app = web.Application()
     app.router.add_get('/', on_start)
-
-    # WebhookRequestHandler will handle POST requests for updates
-    webhook_handler = WebhookRequestHandler(dp)
-    app.router.add_post(f'/{API_TOKEN}', webhook_handler)
+    app.router.add_post(f'/{API_TOKEN}', dp.handle_update)
 
     # Run the bot with webhook
     web.run_app(app, host="0.0.0.0", port=int(os.getenv('PORT', 3000)))
