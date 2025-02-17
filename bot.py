@@ -1,12 +1,18 @@
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.types import ParseMode
 import pymongo
 import random
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 from aiohttp import web
+from aiogram import types
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.middlewares import BaseMiddleware
+from aiogram.dispatcher.filters import Command
 
 load_dotenv()
 
@@ -16,7 +22,7 @@ GROUP_A_CHAT_ID = os.getenv("GROUP_A_CHAT_ID")
 MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
 # Connect to MongoDB using the connection string (if you're using MongoDB Atlas, this will include 'mongodb+srv' in the URI)
 client = pymongo.MongoClient(MONGO_URI)
@@ -29,8 +35,11 @@ logging.basicConfig(level=logging.INFO)
 # User requests cooldown dictionary (to implement 24-hour cooldown)
 user_cooldowns = {}
 
+# Add middleware to handle errors and state management
+dp.middleware.setup(LoggingMiddleware())
+
 # Start command
-@dp.message(commands=['start'])
+@dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     user_name = message.from_user.first_name
     keyboard = InlineKeyboardMarkup().add(
@@ -83,7 +92,7 @@ async def process_back(callback_query: types.CallbackQuery):
     await callback_query.message.answer(f"Hi {user_name}, I am Yelan. You can send your ROM request by /request command.", reply_markup=keyboard)
 
 # Request command
-@dp.message(commands=['request'])
+@dp.message_handler(commands=['request'])
 async def cmd_request(message: types.Message):
     user_id = message.from_user.id
 
@@ -97,7 +106,7 @@ async def cmd_request(message: types.Message):
 
 # Handle the user's ROM request input
 @dp.message_handler(state='waiting_for_rom')
-async def handle_rom_request(message: types.Message):
+async def handle_rom_request(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     request_text = message.text
 
@@ -122,8 +131,11 @@ async def handle_rom_request(message: types.Message):
 
     await message.answer(f"Your request has been sent to Admins. Your request number is: {request_number}")
 
+    # Clear the state after request is handled
+    await state.finish()
+
 # Track command
-@dp.message(commands=['track'])
+@dp.message_handler(commands=['track'])
 async def cmd_track(message: types.Message):
     user_id = message.from_user.id
     request = requests_collection.find_one({'user_id': user_id, 'status': {'$ne': 'completed'}})
@@ -134,13 +146,13 @@ async def cmd_track(message: types.Message):
         await message.answer("No request sent.")
 
 # Ping command
-@dp.message(commands=['ping'])
+@dp.message_handler(commands=['ping'])
 async def cmd_ping(message: types.Message):
     bot_info = await bot.get_me()
     await message.answer(f"Bot latency is {round(bot_info['telegram_id'])} ms.")
 
 # Admin-only: Mark request as done
-@dp.message(commands=['done'])
+@dp.message_handler(commands=['done'])
 async def cmd_done(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
@@ -163,7 +175,7 @@ async def cmd_done(message: types.Message):
         await message.answer("Please provide a valid request number.")
 
 # Admin-only: Send a message to a user
-@dp.message(commands=['send'])
+@dp.message_handler(commands=['send'])
 async def cmd_send(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
@@ -178,7 +190,7 @@ async def cmd_send(message: types.Message):
         await message.answer("Please provide a valid Telegram ID.")
 
 # Admin-only: Broadcast message
-@dp.message(commands=['broadcast'])
+@dp.message_handler(commands=['broadcast'])
 async def cmd_broadcast(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
@@ -196,7 +208,7 @@ async def cmd_broadcast(message: types.Message):
     await message.answer(f"Broadcast sent to {len(users)} users.")
 
 # Admin-only: Show DB details
-@dp.message(commands=['db'])
+@dp.message_handler(commands=['db'])
 async def cmd_db(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
