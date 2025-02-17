@@ -16,7 +16,7 @@ GROUP_A_CHAT_ID = os.getenv("GROUP_A_CHAT_ID")
 MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
 client = pymongo.MongoClient(MONGO_URI)
 db = client['yelan_bot']
@@ -135,7 +135,8 @@ async def cmd_track(message: types.Message):
 # Ping command
 @dp.message_handler(commands=['ping'])
 async def cmd_ping(message: types.Message):
-    await message.answer(f"Bot latency is {round(bot.get_me()['telegram_id'])} ms.")
+    bot_info = await bot.get_me()
+    await message.answer(f"Bot latency is {round(bot_info['telegram_id'])} ms.")
 
 # Admin-only: Mark request as done
 @dp.message_handler(commands=['done'])
