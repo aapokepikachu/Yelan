@@ -1,178 +1,213 @@
 import logging
-import os
-import asyncio
-import pymongo
-from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.client.session.aiohttp import AiohttpSession
-from fastapi import FastAPI
-import uvicorn
+from aiogram.utils import executor
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+import pymongo
+import random
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import os
 
-# Load environment variables
-TOKEN = os.getenv("BOT_TOKEN")
+load_dotenv()
+
+API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
+ADMIN_IDS = os.getenv("ADMIN_IDS").split(",")  # Admin user IDs separated by commas
+GROUP_A_CHAT_ID = os.getenv("GROUP_A_CHAT_ID")
 MONGO_URI = os.getenv("MONGO_URI")
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
-CHANNEL_IDS = list(map(int, os.getenv("CHANNEL_IDS", "").split(','))) if os.getenv("CHANNEL_IDS") else []
 
-if not TOKEN or not MONGO_URI or not CHANNEL_IDS:
-    raise ValueError("Missing required environment variables: BOT_TOKEN, MONGO_URI, or CHANNEL_IDS.")
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
-# Initialize bot and dispatcher
-session = AiohttpSession()
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML, session=session)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-
-# MongoDB connection
 client = pymongo.MongoClient(MONGO_URI)
-db = client["yelan_bot"]
-requests_collection = db["rom_requests"]
-search_collection = db["search_logs"]
+db = client['yelan_bot']
+requests_collection = db['requests']
 
-# Logging setup
+# Enable logging
 logging.basicConfig(level=logging.INFO)
 
-# Cooldown storage
+# User requests cooldown dictionary (to implement 24-hour cooldown)
 user_cooldowns = {}
 
-# FastAPI for Render Web Service
-app = FastAPI()
-
-@app.get("/")
-async def home():
-    return {"status": "Yelan Bot is Running!"}
-
-# /start command
-@dp.message(F.text.startswith("/start"))
-async def start_command(message: types.Message):
-    await message.answer(
-        "👋 Hello! I'm Yelan, your Pokémon ROM Finder! 🎮\n\n"
-        "Use /find <ROM Name> to search for a ROM.\n"
-        "Press 'Help ℹ️' to see my commands.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Help ℹ️", callback_data="help"),
-                 InlineKeyboardButton(text="About Me 🤗", callback_data="about")]
-            ]
-        )
+# Start command
+@dp.message_handler(commands=['start'])
+async def cmd_start(message: types.Message):
+    user_name = message.from_user.first_name
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("Help ℹ️", callback_data="help"),
+        InlineKeyboardButton("About me 🤗", callback_data="about")
     )
+    await message.answer(f"Hi {user_name}, I am Yelan. You can send your ROM request by /request command.", reply_markup=keyboard)
 
-@dp.callback_query(F.data == "help")
-async def help_callback(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "📌 Commands List:\n"
-        "/find <ROM Name> - Search for a ROM\n"
-        "/request - Request a ROM (24h cooldown) ⏳\n"
-        "/latest - View latest uploads 📥\n"
-        "/featured - Check featured ROMs ⭐\n"
-        "/trending - View trending ROMs 🔥\n"
-        "/cancel - Cancel an ongoing process ❌\n"
-        "/ping - Check bot response time 📡\n"
-        "/mystery - Get a Pokémon fact/joke 🎭\n"
-        "/shinyhunt - See a random Shiny Pokémon ✨\n"
-        "/help_link - Get command links 🔗",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton("Back 🔙", callback_data="back")]]
-        )
+# Help command (Inline Button)
+@dp.callback_query_handler(lambda c: c.data == 'help')
+async def process_help(callback_query: types.CallbackQuery):
+    help_text = """
+    1) /start - Start the bot and greet the user.
+    2) /help - Get help with available commands.
+    3) /about - Get bot information.
+
+    4) /request - Submit a ROM request. The bot will forward your request to admins.
+    5) /track - Track your request status.
+    6) /ping - Check the bot's latency.
+
+    (Admins only):
+    7) /done <request_number> - Mark a request as completed and notify the user.
+    8) /send <telegram_id> - Send a message to a specific user.
+    9) /broadcast - Send a message to all users and track delivery status.
+    10) /db - View database details and storage usage.
+    """
+    keyboard = InlineKeyboardMarkup().add(InlineKeyboardButton("Back 🔙", callback_data="back"))
+    await callback_query.message.answer(help_text, reply_markup=keyboard)
+
+# About me command (Inline Button)
+@dp.callback_query_handler(lambda c: c.data == 'about')
+async def process_about(callback_query: types.CallbackQuery):
+    about_text = """
+    About me:
+    Owner: (AAPoke)[https://telegram.dog/AAPoke]
+    Creator: @PokemonBots
+    Monetization: @PokemonNdsGba
+    """
+    keyboard = InlineKeyboardMarkup().add(InlineKeyboardButton("Back 🔙", callback_data="back"))
+    await callback_query.message.answer(about_text, reply_markup=keyboard)
+
+# Back button handler
+@dp.callback_query_handler(lambda c: c.data == 'back')
+async def process_back(callback_query: types.CallbackQuery):
+    user_name = callback_query.from_user.first_name
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("Help ℹ️", callback_data="help"),
+        InlineKeyboardButton("About me 🤗", callback_data="about")
     )
+    await callback_query.message.answer(f"Hi {user_name}, I am Yelan. You can send your ROM request by /request command.", reply_markup=keyboard)
 
-@dp.callback_query(F.data == "about")
-async def about_callback(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "👤 Owner: @AAPoke\n"
-        "🛠 Creator: @PokemonBots\n"
-        "💰 Monetization: @PokemonNdsGba",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton("Back 🔙", callback_data="back")]]
-        )
-    )
-
-@dp.callback_query(F.data == "back")
-async def back_callback(callback: types.CallbackQuery):
-    await start_command(callback.message)
-
-# /find command
-@dp.message(F.text.startswith("/find"))
-async def find_rom(message: types.Message):
-    query = message.text.replace("/find", "").strip().lower()
-    if not query:
-        await message.reply("⚠️ Please provide a ROM name. Example: /find Pokémon Emerald")
-        return
-
-    found_results = []
-    for channel_id in CHANNEL_IDS:
-        async for msg in bot.iter_history(channel_id, limit=200):
-            if msg.caption and query in msg.caption.lower():
-                link = f"https://t.me/c/{str(channel_id)[4:]}/{msg.message_id}"
-                found_results.append(f"📂 {msg.caption}\n🔗 [Download Here]({link})")
-
-    if found_results:
-        await message.reply("\n\n".join(found_results[:5]), disable_web_page_preview=True)
-        search_collection.insert_one({"query": query, "timestamp": datetime.utcnow()})
-    else:
-        await message.reply(f"❌ No results found for '{query}'. Try /request to ask admins.")
-
-# /request command (24h cooldown)
-@dp.message(F.text.startswith("/request"))
-async def request_rom(message: types.Message):
+# Request command
+@dp.message_handler(commands=['request'])
+async def cmd_request(message: types.Message):
     user_id = message.from_user.id
-    last_request = user_cooldowns.get(user_id)
 
-    if last_request and datetime.utcnow() - last_request < timedelta(hours=24):
-        await message.reply("⏳ You've already requested a ROM in the last 24 hours.")
+    # Check if the user has a cooldown
+    if user_id in user_cooldowns and datetime.now() < user_cooldowns[user_id]:
+        await message.answer("You need to wait before sending another request. Try again later.")
         return
 
-    user_cooldowns[user_id] = datetime.utcnow()
-    requests_collection.insert_one({"user_id": user_id, "username": message.from_user.username, "date": datetime.utcnow()})
-    await bot.send_message(ADMIN_GROUP_ID, f"📩 New ROM Request!\n👤 User: @{message.from_user.username}")
-    await message.reply("📨 ROM request sent to admins!")
+    await message.answer("Which ROM are you requesting?")
+    await dp.current_state().set_state('waiting_for_rom', user_id)
 
-# /latest command
-@dp.message(F.text.startswith("/latest"))
-async def latest_uploads(message: types.Message):
-    uploads = []
-    for channel_id in CHANNEL_IDS:
-        async for msg in bot.iter_history(channel_id, limit=5):
-            link = f"https://t.me/c/{str(channel_id)[4:]}/{msg.message_id}"
-            uploads.append(f"📂 {msg.caption}\n🔗 [Download]({link})")
+# Handle the user's ROM request input
+@dp.message_handler(state='waiting_for_rom')
+async def handle_rom_request(message: types.Message):
+    user_id = message.from_user.id
+    request_text = message.text
 
-    await message.reply("\n\n".join(uploads) if uploads else "🚨 No latest uploads found.")
+    # Create a request number (for simplicity, using random number here)
+    request_number = random.randint(1000, 9999)
 
-# /trending command
-@dp.message(F.text.startswith("/trending"))
-async def trending_roms(message: types.Message):
-    trends = search_collection.aggregate([
-        {"$group": {"_id": "$query", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 5}
-    ])
-    result = "\n".join([f"🔥 {t['_id']} - {t['count']} searches" for t in trends])
-    await message.reply(f"📊 Trending ROMs:\n\n{result if result else 'No trends yet!'}")
+    # Forward the request to the admin group (GROUP_A_CHAT_ID)
+    admin_message = f"New ROM request from {message.from_user.first_name} (@{message.from_user.username}):\n\nRequest: {request_text}\nRequest Number: {request_number}\nUser ID: {user_id}\nUsername: @{message.from_user.username}"
+    await bot.forward_message(chat_id=GROUP_A_CHAT_ID, from_chat_id=message.chat.id, message_id=message.message_id)
 
-# /featured command
-@dp.message(F.text.startswith("/featured"))
-async def featured_roms(message: types.Message):
-    featured_list = [
-        "⭐ Pokémon FireRed Enhanced 🔗 [Download Link](https://example.com)",
-        "⭐ Pokémon Emerald Kaizo 🔗 [Download Link](https://example.com)",
-        "⭐ Pokémon Gaia 🔗 [Download Link](https://example.com)"
-    ]
-    await message.reply("\n".join(featured_list), disable_web_page_preview=True)
+    # Save the request to MongoDB
+    requests_collection.insert_one({
+        'user_id': user_id,
+        'request_text': request_text,
+        'request_number': request_number,
+        'status': 'pending',
+        'timestamp': datetime.now()
+    })
 
-# Start bot function
-async def start_bot():
-    """Starts the bot using long polling"""
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    # Set a 24-hour cooldown for the user
+    user_cooldowns[user_id] = datetime.now() + timedelta(hours=24)
 
-# Start FastAPI & bot properly
-if __name__ == "__main__":
-    logging.info("🚀 Starting FastAPI & Telegram Bot...")
-    port = int(os.getenv("PORT", 10000))  # Render port
+    await message.answer(f"Your request has been sent to Admins. Your request number is: {request_number}")
+
+# Track command
+@dp.message_handler(commands=['track'])
+async def cmd_track(message: types.Message):
+    user_id = message.from_user.id
+    request = requests_collection.find_one({'user_id': user_id, 'status': {'$ne': 'completed'}})
     
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_bot())  # Run bot as a background task
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    if request:
+        await message.answer(f"Your request number is {request['request_number']} and the status is {request['status']}.")
+    else:
+        await message.answer("No request sent.")
+
+# Ping command
+@dp.message_handler(commands=['ping'])
+async def cmd_ping(message: types.Message):
+    await message.answer(f"Bot latency is {round(bot.get_me()['telegram_id'])} ms.")
+
+# Admin-only: Mark request as done
+@dp.message_handler(commands=['done'])
+async def cmd_done(message: types.Message):
+    if message.from_user.id not in map(int, ADMIN_IDS):
+        await message.answer("You are not authorized to use this command.")
+        return
+
+    try:
+        request_number = int(message.get_args())
+        request = requests_collection.find_one({'request_number': request_number})
+        
+        if request:
+            requests_collection.update_one(
+                {'request_number': request_number},
+                {'$set': {'status': 'completed'}}
+            )
+            await message.answer(f"Request number {request_number} is marked as completed!")
+        else:
+            await message.answer(f"No request found with number {request_number}.")
+    
+    except ValueError:
+        await message.answer("Please provide a valid request number.")
+
+# Admin-only: Send a message to a user
+@dp.message_handler(commands=['send'])
+async def cmd_send(message: types.Message):
+    if message.from_user.id not in map(int, ADMIN_IDS):
+        await message.answer("You are not authorized to use this command.")
+        return
+
+    try:
+        telegram_id = int(message.get_args())
+        await bot.send_message(telegram_id, "Here is your requested ROM!")
+        await message.answer(f"Message sent to {telegram_id}.")
+    
+    except ValueError:
+        await message.answer("Please provide a valid Telegram ID.")
+
+# Admin-only: Broadcast message
+@dp.message_handler(commands=['broadcast'])
+async def cmd_broadcast(message: types.Message):
+    if message.from_user.id not in map(int, ADMIN_IDS):
+        await message.answer("You are not authorized to use this command.")
+        return
+
+    text = message.get_args()
+    users = requests_collection.find()
+
+    for user in users:
+        try:
+            await bot.send_message(user['user_id'], text)
+        except Exception as e:
+            logging.error(f"Failed to send to {user['user_id']}: {e}")
+    
+    await message.answer(f"Broadcast sent to {len(users)} users.")
+
+# Admin-only: Show DB details
+@dp.message_handler(commands=['db'])
+async def cmd_db(message: types.Message):
+    if message.from_user.id not in map(int, ADMIN_IDS):
+        await message.answer("You are not authorized to use this command.")
+        return
+
+    db_stats = {
+        "Request Count": requests_collection.count_documents({}),
+    }
+
+    db_details = "\n".join([f"{key}: {value}" for key, value in db_stats.items()])
+    await message.answer(f"Database Details:\n{db_details}")
+
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
