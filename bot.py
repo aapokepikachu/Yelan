@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 user_cooldowns = {}
 
 # Start command
-@dp.message_handler(commands=['start'])
+@dp.message(commands=['start'])
 async def cmd_start(message: types.Message):
     user_name = message.from_user.first_name
     keyboard = InlineKeyboardMarkup().add(
@@ -83,7 +83,7 @@ async def process_back(callback_query: types.CallbackQuery):
     await callback_query.message.answer(f"Hi {user_name}, I am Yelan. You can send your ROM request by /request command.", reply_markup=keyboard)
 
 # Request command
-@dp.message_handler(commands=['request'])
+@dp.message(commands=['request'])
 async def cmd_request(message: types.Message):
     user_id = message.from_user.id
 
@@ -123,7 +123,7 @@ async def handle_rom_request(message: types.Message):
     await message.answer(f"Your request has been sent to Admins. Your request number is: {request_number}")
 
 # Track command
-@dp.message_handler(commands=['track'])
+@dp.message(commands=['track'])
 async def cmd_track(message: types.Message):
     user_id = message.from_user.id
     request = requests_collection.find_one({'user_id': user_id, 'status': {'$ne': 'completed'}})
@@ -134,13 +134,13 @@ async def cmd_track(message: types.Message):
         await message.answer("No request sent.")
 
 # Ping command
-@dp.message_handler(commands=['ping'])
+@dp.message(commands=['ping'])
 async def cmd_ping(message: types.Message):
     bot_info = await bot.get_me()
     await message.answer(f"Bot latency is {round(bot_info['telegram_id'])} ms.")
 
 # Admin-only: Mark request as done
-@dp.message_handler(commands=['done'])
+@dp.message(commands=['done'])
 async def cmd_done(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
@@ -163,7 +163,7 @@ async def cmd_done(message: types.Message):
         await message.answer("Please provide a valid request number.")
 
 # Admin-only: Send a message to a user
-@dp.message_handler(commands=['send'])
+@dp.message(commands=['send'])
 async def cmd_send(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
@@ -178,7 +178,7 @@ async def cmd_send(message: types.Message):
         await message.answer("Please provide a valid Telegram ID.")
 
 # Admin-only: Broadcast message
-@dp.message_handler(commands=['broadcast'])
+@dp.message(commands=['broadcast'])
 async def cmd_broadcast(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
@@ -196,7 +196,7 @@ async def cmd_broadcast(message: types.Message):
     await message.answer(f"Broadcast sent to {len(users)} users.")
 
 # Admin-only: Show DB details
-@dp.message_handler(commands=['db'])
+@dp.message(commands=['db'])
 async def cmd_db(message: types.Message):
     if message.from_user.id not in map(int, ADMIN_IDS):
         await message.answer("You are not authorized to use this command.")
