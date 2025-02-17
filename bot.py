@@ -7,6 +7,7 @@ import pymongo
 import random
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import time
 import os
 from aiohttp import web
 from aiogram import types
@@ -148,8 +149,12 @@ async def cmd_track(message: types.Message):
 # Ping command
 @dp.message_handler(commands=['ping'])
 async def cmd_ping(message: types.Message):
-    bot_info = await bot.get_me()
-    await message.answer(f"Bot latency is {round(bot_info['telegram_id'])} ms.")
+    start_time = time.time()  # Record the start time
+    bot_info = await bot.get_me()  # Get bot information
+    end_time = time.time()  # Record the end time after getting the response
+
+    latency = round((end_time - start_time) * 1000)  # Calculate latency in milliseconds
+    await message.answer(f"Bot latency is {latency} ms.")
 
 # Admin-only: Mark request as done
 @dp.message_handler(commands=['done'])
