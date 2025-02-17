@@ -1,3 +1,3 @@
-aiogram==3.0.0b10
+aiogram==2.24
 pymongo==4.1.1
 python-dotenv==1.0.0
