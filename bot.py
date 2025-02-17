@@ -8,6 +8,7 @@ import random
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
+from aiohttp import web
 
 load_dotenv()
 
@@ -128,7 +129,7 @@ async def handle_rom_request(message: types.Message):
 async def cmd_track(message: types.Message):
     user_id = message.from_user.id
     request = requests_collection.find_one({'user_id': user_id, 'status': {'$ne': 'completed'}})
-    
+
     if request:
         await message.answer(f"Your request number is {request['request_number']} and the status is {request['status']}.")
     else:
@@ -149,7 +150,7 @@ async def cmd_done(message: types.Message):
     try:
         request_number = int(message.get_args())
         request = requests_collection.find_one({'request_number': request_number})
-        
+
         if request:
             requests_collection.update_one(
                 {'request_number': request_number},
@@ -158,7 +159,7 @@ async def cmd_done(message: types.Message):
             await message.answer(f"Request number {request_number} is marked as completed!")
         else:
             await message.answer(f"No request found with number {request_number}.")
-    
+
     except ValueError:
         await message.answer("Please provide a valid request number.")
 
@@ -173,7 +174,7 @@ async def cmd_send(message: types.Message):
         telegram_id = int(message.get_args())
         await bot.send_message(telegram_id, "Here is your requested ROM!")
         await message.answer(f"Message sent to {telegram_id}.")
-    
+
     except ValueError:
         await message.answer("Please provide a valid Telegram ID.")
 
@@ -192,7 +193,7 @@ async def cmd_broadcast(message: types.Message):
             await bot.send_message(user['user_id'], text)
         except Exception as e:
             logging.error(f"Failed to send to {user['user_id']}: {e}")
-    
+
     await message.answer(f"Broadcast sent to {len(users)} users.")
 
 # Admin-only: Show DB details
@@ -209,5 +210,15 @@ async def cmd_db(message: types.Message):
     db_details = "\n".join([f"{key}: {value}" for key, value in db_stats.items()])
     await message.answer(f"Database Details:\n{db_details}")
 
+# Webhook setup (to be used in Render)
+async def on_start(request):
+    return web.Response(text="Bot is running!")
+
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    # Set up the webhook URL for Render
+    app = web.Application()
+    app.router.add_get('/', on_start)
+    app.router.add_post(f'/{API_TOKEN}', dp.handle_update)
+
+    # Run the bot with webhook
+    web.run_app(app, host="0.0.0.0", port=int(os.getenv('PORT', 3000)))
