@@ -17,6 +17,9 @@ MONGO_URI = os.getenv("MONGO_URI")
 ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
 CHANNEL_IDS = list(map(int, os.getenv("CHANNEL_IDS", "").split(','))) if os.getenv("CHANNEL_IDS") else []
 
+if not TOKEN or not MONGO_URI or not CHANNEL_IDS:
+    raise ValueError("Missing required environment variables: BOT_TOKEN, MONGO_URI, or CHANNEL_IDS.")
+
 # Initialize bot and dispatcher
 session = AiohttpSession()
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML, session=session)
@@ -41,17 +44,6 @@ app = FastAPI()
 @app.get("/")
 async def home():
     return {"status": "Yelan Bot is Running!"}
-
-@app.on_event("startup")
-async def on_startup():
-    """Runs when FastAPI starts"""
-    logging.info("🚀 FastAPI has started. Launching Telegram bot...")
-    asyncio.create_task(start_bot())  # Ensures bot starts without blocking FastAPI
-
-async def start_bot():
-    """Starts the bot using long polling"""
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
 
 # /start command
 @dp.message(F.text.startswith("/start"))
@@ -112,7 +104,7 @@ async def find_rom(message: types.Message):
 
     found_results = []
     for channel_id in CHANNEL_IDS:
-        async for msg in bot.get_chat_history(channel_id, limit=200):
+        async for msg in bot.iter_history(channel_id, limit=200):
             if msg.caption and query in msg.caption.lower():
                 link = f"https://t.me/c/{str(channel_id)[4:]}/{msg.message_id}"
                 found_results.append(f"📂 {msg.caption}\n🔗 [Download Here]({link})")
@@ -129,12 +121,12 @@ async def request_rom(message: types.Message):
     user_id = message.from_user.id
     last_request = user_cooldowns.get(user_id)
 
-    if last_request and datetime.now() - last_request < timedelta(hours=24):
+    if last_request and datetime.utcnow() - last_request < timedelta(hours=24):
         await message.reply("⏳ You've already requested a ROM in the last 24 hours.")
         return
 
-    user_cooldowns[user_id] = datetime.now()
-    requests_collection.insert_one({"user_id": user_id, "username": message.from_user.username, "date": datetime.now()})
+    user_cooldowns[user_id] = datetime.utcnow()
+    requests_collection.insert_one({"user_id": user_id, "username": message.from_user.username, "date": datetime.utcnow()})
     await bot.send_message(ADMIN_GROUP_ID, f"📩 New ROM Request!\n👤 User: @{message.from_user.username}")
     await message.reply("📨 ROM request sent to admins!")
 
@@ -143,7 +135,7 @@ async def request_rom(message: types.Message):
 async def latest_uploads(message: types.Message):
     uploads = []
     for channel_id in CHANNEL_IDS:
-        async for msg in bot.get_chat_history(channel_id, limit=5):
+        async for msg in bot.iter_history(channel_id, limit=5):
             link = f"https://t.me/c/{str(channel_id)[4:]}/{msg.message_id}"
             uploads.append(f"📂 {msg.caption}\n🔗 [Download]({link})")
 
@@ -170,7 +162,15 @@ async def featured_roms(message: types.Message):
     ]
     await message.reply("\n".join(featured_list), disable_web_page_preview=True)
 
-# Start FastAPI
+# Start bot function
+async def start_bot():
+    """Starts the bot using long polling"""
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+# Start FastAPI and bot
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))  # Ensure Render port is used
+    logging.info("🚀 Starting FastAPI & Telegram Bot...")
+    port = int(os.getenv("PORT", 10000))  # Render port
+    asyncio.create_task(start_bot())  # Ensures bot runs
     uvicorn.run(app, host="0.0.0.0", port=port)
