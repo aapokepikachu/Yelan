@@ -18,6 +18,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
+# Connect to MongoDB using the connection string (if you're using MongoDB Atlas, this will include 'mongodb+srv' in the URI)
 client = pymongo.MongoClient(MONGO_URI)
 db = client['yelan_bot']
 requests_collection = db['requests']
