@@ -1,4 +1,4 @@
-aiogram==2.21
-pymongo[srv]==4.1.1
-python-dotenv==0.19.2
-aiohttp==3.8.5
+aiogram==3.0.0b10
+pymongo[srv]==3.12.0
+python-dotenv==0.21.0
+aiohttp==3.8.1
