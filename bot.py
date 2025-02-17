@@ -1,7 +1,6 @@
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
 import pymongo
 import random
 from datetime import datetime, timedelta
@@ -18,7 +17,6 @@ MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
 
 client = pymongo.MongoClient(MONGO_URI)
 db = client['yelan_bot']
