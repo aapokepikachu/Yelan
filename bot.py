@@ -168,9 +168,11 @@ async def start_bot():
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
-# Start FastAPI and bot
+# Start FastAPI & bot properly
 if __name__ == "__main__":
     logging.info("🚀 Starting FastAPI & Telegram Bot...")
     port = int(os.getenv("PORT", 10000))  # Render port
-    asyncio.create_task(start_bot())  # Ensures bot runs
+    
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_bot())  # Run bot as a background task
     uvicorn.run(app, host="0.0.0.0", port=port)
