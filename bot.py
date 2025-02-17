@@ -14,8 +14,8 @@ import uvicorn
 # Load environment variables
 TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID"))
-CHANNEL_IDS = list(map(int, os.getenv("CHANNEL_IDS").split(',')))
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
+CHANNEL_IDS = list(map(int, os.getenv("CHANNEL_IDS", "").split(','))) if os.getenv("CHANNEL_IDS") else []
 
 # Initialize bot and dispatcher
 session = AiohttpSession()
@@ -42,31 +42,32 @@ app = FastAPI()
 async def home():
     return {"status": "Yelan Bot is Running!"}
 
-# Start message
-async def start_message():
-    return (
-        "👋 Hello! I'm Yelan, your Pokémon ROM Finder! 🎮\n\n"
-        "Use /find <ROM Name> to search for a ROM.\n"
-        "Press 'Help ℹ️' to see my commands."
-    )
+@app.on_event("startup")
+async def on_startup():
+    """Runs when FastAPI starts"""
+    logging.info("🚀 FastAPI has started. Launching Telegram bot...")
+    asyncio.create_task(start_bot())  # Ensures bot starts without blocking FastAPI
 
-# Inline buttons
-def main_menu():
-    buttons = [
-        [InlineKeyboardButton(text="Help ℹ️", callback_data="help"),
-         InlineKeyboardButton(text="About Me 🤗", callback_data="about")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def back_button():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton("Back 🔙", callback_data="back")]])
+async def start_bot():
+    """Starts the bot using long polling"""
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 # /start command
 @dp.message(F.text.startswith("/start"))
 async def start_command(message: types.Message):
-    await message.answer(await start_message(), reply_markup=main_menu())
+    await message.answer(
+        "👋 Hello! I'm Yelan, your Pokémon ROM Finder! 🎮\n\n"
+        "Use /find <ROM Name> to search for a ROM.\n"
+        "Press 'Help ℹ️' to see my commands.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Help ℹ️", callback_data="help"),
+                 InlineKeyboardButton(text="About Me 🤗", callback_data="about")]
+            ]
+        )
+    )
 
-# Inline button handlers
 @dp.callback_query(F.data == "help")
 async def help_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(
@@ -81,7 +82,9 @@ async def help_callback(callback: types.CallbackQuery):
         "/mystery - Get a Pokémon fact/joke 🎭\n"
         "/shinyhunt - See a random Shiny Pokémon ✨\n"
         "/help_link - Get command links 🔗",
-        reply_markup=back_button()
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton("Back 🔙", callback_data="back")]]
+        )
     )
 
 @dp.callback_query(F.data == "about")
@@ -90,12 +93,14 @@ async def about_callback(callback: types.CallbackQuery):
         "👤 Owner: @AAPoke\n"
         "🛠 Creator: @PokemonBots\n"
         "💰 Monetization: @PokemonNdsGba",
-        reply_markup=back_button()
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton("Back 🔙", callback_data="back")]]
+        )
     )
 
 @dp.callback_query(F.data == "back")
 async def back_callback(callback: types.CallbackQuery):
-    await callback.message.edit_text(await start_message(), reply_markup=main_menu())
+    await start_command(callback.message)
 
 # /find command
 @dp.message(F.text.startswith("/find"))
@@ -165,16 +170,7 @@ async def featured_roms(message: types.Message):
     ]
     await message.reply("\n".join(featured_list), disable_web_page_preview=True)
 
-# Start the bot
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
-
+# Start FastAPI
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))  # Fix for Render deployment
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    loop.create_task(main())  # Correctly schedules the bot's async task
-    uvicorn.run(app, host="0.0.0.0", port=port)  # Runs FastAPI properly
+    port = int(os.getenv("PORT", 10000))  # Ensure Render port is used
+    uvicorn.run(app, host="0.0.0.0", port=port)
