@@ -79,6 +79,7 @@ async def request_command(client, message):
     if last_request and datetime.utcnow() - last_request["timestamp"] < timedelta(hours=24):
         return await message.reply_text("You can only send one request every 24 hours.")
 
+    # Prompt user to send ROM request
     await message.reply_text("Which ROM are you requesting? Send your request or use /cancel.")
     await db.requests.update_one({"user_id": user_id}, {"$set": {"status": "waiting"}}, upsert=True)
 
@@ -88,7 +89,12 @@ async def receive_request(client, message):
     request_entry = await db.requests.find_one({"user_id": user_id, "status": "waiting"})
 
     if request_entry:
-        request_id = request_entry.get("request_id", await db.requests.count_documents({}) + 1)
+        # Check if request_id is set; if not, generate one
+        request_id = request_entry.get("request_id")
+        if not request_id:
+            request_id = await db.requests.count_documents({}) + 1  # Generate request_id if not present
+
+        # Update the request details in the database
         await db.requests.update_one({"user_id": user_id}, {"$set": {
             "request_id": request_id,
             "request": message.text,
@@ -96,6 +102,7 @@ async def receive_request(client, message):
             "status": "pending"
         }})
 
+        # Send request to admin group
         request_details = f"**New ROM Request:**\nRequest ID: {request_id}\nUser: {message.from_user.username or 'No Username'}\nUser ID: {user_id}\nRequest: {message.text}"
         await client.send_message(GROUP_ID, request_details)
 
@@ -133,24 +140,32 @@ async def mark_done(client, message):
     if len(message.command) < 2:
         return await message.reply_text("Please provide a request ID.")
 
-    request_id = int(message.command[1])
-    request = await db.requests.find_one({"request_id": request_id})
+    try:
+        request_id = int(message.command[1])
+        request = await db.requests.find_one({"request_id": request_id})
 
-    if request:
-        await db.requests.update_one({"request_id": request_id}, {"$set": {"status": "Completed ✅"}})
-        await client.send_message(request["user_id"], "Your request has been completed ✅")
-        await message.reply_text("Marked as completed.")
-    else:
-        await message.reply_text("Request ID not found.")
+        if request:
+            await db.requests.update_one({"request_id": request_id}, {"$set": {"status": "Completed ✅"}})
+            await client.send_message(request["user_id"], "Your request has been completed ✅")
+            await message.reply_text("Marked as completed.")
+        else:
+            await message.reply_text("Request ID not found.")
+    except ValueError:
+        await message.reply_text("Invalid request ID. It must be an integer.")
 
 @bot.on_message(filters.command("send"))
 async def send_message(client, message):
     if not is_admin(message.from_user.id) or not message.reply_to_message:
         return await message.reply_text("Reply to a message and use /send <telegram_id>")
 
-    user_id = int(message.command[1])
-    await client.send_message(user_id, message.reply_to_message.text)
-    await message.reply_text("Message sent.")
+    try:
+        user_id = int(message.command[1])
+        await client.send_message(user_id, message.reply_to_message.text)
+        await message.reply_text("Message sent.")
+    except IndexError:
+        await message.reply_text("Please provide a valid user ID.")
+    except ValueError:
+        await message.reply_text("Invalid user ID.")
 
 @bot.on_message(filters.command("broadcast"))
 async def broadcast(client, message):
