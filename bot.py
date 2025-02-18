@@ -1,240 +1,176 @@
-import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.types import ParseMode
-import pymongo
-import random
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
-import time
 import os
-from aiohttp import web
-from aiogram import types
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.middlewares import BaseMiddleware
-from aiogram.dispatcher.filters import Command
+import asyncio
+import threading
+from datetime import datetime, timedelta
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from motor.motor_asyncio import AsyncIOMotorClient
+import web
 
-load_dotenv()
-
-API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
-ADMIN_IDS = os.getenv("ADMIN_IDS").split(",")  # Admin user IDs separated by commas
-GROUP_A_CHAT_ID = os.getenv("GROUP_A_CHAT_ID")
+# Load environment variables
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
+GROUP_ID = int(os.getenv("GROUP_ID"))
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+# Initialize bot and MongoDB
+bot = Client("yelan", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+db_client = AsyncIOMotorClient(MONGO_URI)
+db = db_client["yelan_db"]
 
-# Connect to MongoDB using the connection string (if you're using MongoDB Atlas, this will include 'mongodb+srv' in the URI)
-client = pymongo.MongoClient(MONGO_URI)
-db = client['yelan_bot']
-requests_collection = db['requests']
+START_TEXT = "Hi {name}, I am Yelan. You can send your ROM request by /request command."
+START_BUTTONS = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Help ℹ️", callback_data="help"),
+     InlineKeyboardButton("About me 🤗", callback_data="about")]
+])
 
-# Enable logging
-logging.basicConfig(level=logging.INFO)
+HELP_TEXT = """**Commands:**
+/start - Start message  
+/help - Show this help  
+/about - About the bot  
+/request - Request a ROM  
+/track - Track request  
+/ping - Show latency  
 
-# User requests cooldown dictionary (to implement 24-hour cooldown)
-user_cooldowns = {}
+**Admin Commands:**
+/done <request_number> - Mark request complete  
+/send <telegram_id> - Send user a message  
+/broadcast - Broadcast message  
+/db - Show database details"""
 
-# Add middleware to handle errors and state management
-dp.middleware.setup(LoggingMiddleware())
+ABOUT_TEXT = """**About Me:**  
+Owner: [AAPoke](https://telegram.dog/AAPoke)  
+Creator: @PokemonBots  
+Monetization: @PokemonNdsGba"""
 
-# Start command
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    user_name = message.from_user.first_name
-    keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("Help ℹ️", callback_data="help"),
-        InlineKeyboardButton("About me 🤗", callback_data="about")
-    )
-    await message.answer(f"Hi {user_name}, I am Yelan. You can send your ROM request by /request command.", reply_markup=keyboard)
+BACK_BUTTON = InlineKeyboardMarkup([[InlineKeyboardButton("Back 🔙", callback_data="start")]])
 
-# Help command (Inline Button)
-@dp.callback_query_handler(lambda c: c.data == 'help')
-async def process_help(callback_query: types.CallbackQuery):
-    help_text = """
-    1) /start - Start the bot and greet the user.
-    2) /help - Get help with available commands.
-    3) /about - Get bot information.
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
 
-    4) /request - Submit a ROM request. The bot will forward your request to admins.
-    5) /track - Track your request status.
-    6) /ping - Check the bot's latency.
+@bot.on_message(filters.command("start"))
+async def start(client, message):
+    await message.reply_text(START_TEXT.format(name=message.from_user.first_name), reply_markup=START_BUTTONS)
 
-    (Admins only):
-    7) /done <request_number> - Mark a request as completed and notify the user.
-    8) /send <telegram_id> - Send a message to a specific user.
-    9) /broadcast - Send a message to all users and track delivery status.
-    10) /db - View database details and storage usage.
-    """
-    keyboard = InlineKeyboardMarkup().add(InlineKeyboardButton("Back 🔙", callback_data="back"))
-    await callback_query.message.answer(help_text, reply_markup=keyboard)
+@bot.on_callback_query()
+async def callback_handler(client, query):
+    if query.data == "help":
+        await query.message.edit_text(HELP_TEXT, reply_markup=BACK_BUTTON)
+    elif query.data == "about":
+        await query.message.edit_text(ABOUT_TEXT, reply_markup=BACK_BUTTON)
+    elif query.data == "start":
+        await query.message.edit_text(START_TEXT.format(name=query.from_user.first_name), reply_markup=START_BUTTONS)
 
-# About me command (Inline Button)
-@dp.callback_query_handler(lambda c: c.data == 'about')
-async def process_about(callback_query: types.CallbackQuery):
-    about_text = """
-    About me:
-    Owner: (AAPoke)[https://telegram.dog/AAPoke]
-    Creator: @PokemonBots
-    Monetization: @PokemonNdsGba
-    """
-    keyboard = InlineKeyboardMarkup().add(InlineKeyboardButton("Back 🔙", callback_data="back"))
-    await callback_query.message.answer(about_text, reply_markup=keyboard)
+@bot.on_message(filters.command("help"))
+async def help_command(client, message):
+    await message.reply_text(HELP_TEXT, reply_markup=BACK_BUTTON)
 
-# Back button handler
-@dp.callback_query_handler(lambda c: c.data == 'back')
-async def process_back(callback_query: types.CallbackQuery):
-    user_name = callback_query.from_user.first_name
-    keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("Help ℹ️", callback_data="help"),
-        InlineKeyboardButton("About me 🤗", callback_data="about")
-    )
-    await callback_query.message.answer(f"Hi {user_name}, I am Yelan. You can send your ROM request by /request command.", reply_markup=keyboard)
+@bot.on_message(filters.command("about"))
+async def about_command(client, message):
+    await message.reply_text(ABOUT_TEXT, reply_markup=BACK_BUTTON)
 
-# Request command
-@dp.message_handler(commands=['request'])
-async def cmd_request(message: types.Message):
+@bot.on_message(filters.command("request"))
+async def request_command(client, message):
     user_id = message.from_user.id
+    last_request = await db.requests.find_one({"user_id": user_id})
+    
+    if last_request and datetime.utcnow() - last_request["timestamp"] < timedelta(hours=24):
+        return await message.reply_text("You can only send one request every 24 hours.")
+    
+    await message.reply_text("Which ROM are you requesting? Send your request or use /cancel.")
+    await db.requests.update_one({"user_id": user_id}, {"$set": {"status": "waiting"}}, upsert=True)
 
-    # Check if the user has a cooldown
-    if user_id in user_cooldowns and datetime.now() < user_cooldowns[user_id]:
-        await message.answer("You need to wait before sending another request. Try again later.")
-        return
-
-    await message.answer("Which ROM are you requesting?")
-    await dp.current_state().set_state('waiting_for_rom', user_id)
-
-# Handle the user's ROM request input
-@dp.message_handler(state='waiting_for_rom')
-async def handle_rom_request(message: types.Message, state: FSMContext):
+@bot.on_message(filters.text & ~filters.command(["cancel", "request"]))
+async def receive_request(client, message):
     user_id = message.from_user.id
-    request_text = message.text
+    request_entry = await db.requests.find_one({"user_id": user_id, "status": "waiting"})
+    
+    if request_entry:
+        request_id = request_entry.get("request_id", await db.requests.count_documents({}) + 1)
+        await db.requests.update_one({"user_id": user_id}, {"$set": {
+            "request_id": request_id,
+            "request": message.text,
+            "timestamp": datetime.utcnow(),
+            "status": "pending"
+        }})
+        
+        request_details = f"**New ROM Request:**\nRequest ID: {request_id}\nUser: {message.from_user.username or 'No Username'}\nUser ID: {user_id}\nRequest: {message.text}"
+        await client.send_message(GROUP_ID, request_details)
+        
+        await message.reply_text(f"Your request has been sent to the Admins. Request ID: {request_id}")
 
-    # Create a request number (for simplicity, using random number here)
-    request_number = random.randint(1000, 9999)
-
-    # Forward the request to the admin group (GROUP_A_CHAT_ID)
-    admin_message = f"New ROM request from {message.from_user.first_name} (@{message.from_user.username}):\n\nRequest: {request_text}\nRequest Number: {request_number}\nUser ID: {user_id}\nUsername: @{message.from_user.username}"
-    await bot.forward_message(chat_id=GROUP_A_CHAT_ID, from_chat_id=message.chat.id, message_id=message.message_id)
-
-    # Save the request to MongoDB
-    requests_collection.insert_one({
-        'user_id': user_id,
-        'request_text': request_text,
-        'request_number': request_number,
-        'status': 'pending',
-        'timestamp': datetime.now()
-    })
-
-    # Set a 24-hour cooldown for the user
-    user_cooldowns[user_id] = datetime.now() + timedelta(hours=24)
-
-    await message.answer(f"Your request has been sent to Admins. Your request number is: {request_number}")
-
-    # Clear the state after request is handled
-    await state.finish()
-
-# Track command
-@dp.message_handler(commands=['track'])
-async def cmd_track(message: types.Message):
+@bot.on_message(filters.command("cancel"))
+async def cancel_request(client, message):
     user_id = message.from_user.id
-    request = requests_collection.find_one({'user_id': user_id, 'status': {'$ne': 'completed'}})
+    await db.requests.delete_one({"user_id": user_id, "status": "waiting"})
+    await message.reply_text("Your request process has been cancelled.")
 
-    if request:
-        await message.answer(f"Your request number is {request['request_number']} and the status is {request['status']}.")
+@bot.on_message(filters.command("track"))
+async def track_request(client, message):
+    user_id = message.from_user.id
+    request = await db.requests.find_one({"user_id": user_id})
+    
+    if not request:
+        await message.reply_text("No request sent.")
     else:
-        await message.answer("No request sent.")
+        status = request.get("status", "Unknown")
+        await message.reply_text(f"Request ID: {request['request_id']}\nStatus: {status}")
 
-# Ping command
-@dp.message_handler(commands=['ping'])
-async def cmd_ping(message: types.Message):
-    start_time = time.time()  # Record the start time
-    bot_info = await bot.get_me()  # Get bot information
-    end_time = time.time()  # Record the end time after getting the response
+@bot.on_message(filters.command("ping"))
+async def ping_command(client, message):
+    start_time = datetime.utcnow()
+    reply = await message.reply_text("Pong!")
+    latency = (datetime.utcnow() - start_time).microseconds / 1000
+    await reply.edit_text(f"Pong! `{latency}ms`")
 
-    latency = round((end_time - start_time) * 1000)  # Calculate latency in milliseconds
-    await message.answer(f"Bot latency is {latency} ms.")
+@bot.on_message(filters.command("done"))
+async def mark_done(client, message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("You are not authorized to use this command.")
+    
+    request_id = int(message.command[1])
+    request = await db.requests.find_one({"request_id": request_id})
+    
+    if request:
+        await db.requests.update_one({"request_id": request_id}, {"$set": {"status": "Completed ✅"}})
+        await client.send_message(request["user_id"], "Your request has been completed ✅")
+        await message.reply_text("Marked as completed.")
 
-# Admin-only: Mark request as done
-@dp.message_handler(commands=['done'])
-async def cmd_done(message: types.Message):
-    if message.from_user.id not in map(int, ADMIN_IDS):
-        await message.answer("You are not authorized to use this command.")
-        return
+@bot.on_message(filters.command("send"))
+async def send_message(client, message):
+    if not is_admin(message.from_user.id) or not message.reply_to_message:
+        return await message.reply_text("Reply to a message and use /send <telegram_id>")
+    
+    user_id = int(message.command[1])
+    await client.send_message(user_id, message.reply_to_message.text)
+    await message.reply_text("Message sent.")
 
-    try:
-        request_number = int(message.get_args())
-        request = requests_collection.find_one({'request_number': request_number})
+@bot.on_message(filters.command("broadcast"))
+async def broadcast(client, message):
+    if not is_admin(message.from_user.id) or not message.reply_to_message:
+        return await message.reply_text("Reply to a message to broadcast.")
 
-        if request:
-            requests_collection.update_one(
-                {'request_number': request_number},
-                {'$set': {'status': 'completed'}}
-            )
-            await message.answer(f"Request number {request_number} is marked as completed!")
-        else:
-            await message.answer(f"No request found with number {request_number}.")
-
-    except ValueError:
-        await message.answer("Please provide a valid request number.")
-
-# Admin-only: Send a message to a user
-@dp.message_handler(commands=['send'])
-async def cmd_send(message: types.Message):
-    if message.from_user.id not in map(int, ADMIN_IDS):
-        await message.answer("You are not authorized to use this command.")
-        return
-
-    try:
-        telegram_id = int(message.get_args())
-        await bot.send_message(telegram_id, "Here is your requested ROM!")
-        await message.answer(f"Message sent to {telegram_id}.")
-
-    except ValueError:
-        await message.answer("Please provide a valid Telegram ID.")
-
-# Admin-only: Broadcast message
-@dp.message_handler(commands=['broadcast'])
-async def cmd_broadcast(message: types.Message):
-    if message.from_user.id not in map(int, ADMIN_IDS):
-        await message.answer("You are not authorized to use this command.")
-        return
-
-    text = message.get_args()
-    users = requests_collection.find()
-
+    users = await db.requests.distinct("user_id")
     for user in users:
         try:
-            await bot.send_message(user['user_id'], text)
-        except Exception as e:
-            logging.error(f"Failed to send to {user['user_id']}: {e}")
+            await client.send_message(user, message.reply_to_message.text)
+        except:
+            pass
+    await message.reply_text(f"Broadcast sent to {len(users)} users.")
 
-    await message.answer(f"Broadcast sent to {len(users)} users.")
+@bot.on_message(filters.command("db"))
+async def db_stats(client, message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("You are not authorized.")
 
-# Admin-only: Show DB details
-@dp.message_handler(commands=['db'])
-async def cmd_db(message: types.Message):
-    if message.from_user.id not in map(int, ADMIN_IDS):
-        await message.answer("You are not authorized to use this command.")
-        return
+    count = await db.requests.count_documents({})
+    await message.reply_text(f"Total requests: {count}")
 
-    db_stats = {
-        "Request Count": requests_collection.count_documents({}),
-    }
+def run_flask():
+    web.app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
 
-    db_details = "\n".join([f"{key}: {value}" for key, value in db_stats.items()])
-    await message.answer(f"Database Details:\n{db_details}")
-
-# Webhook setup (to be used in Render)
-async def on_start(request):
-    return web.Response(text="Bot is running!")
-
-if __name__ == '__main__':
-    # Set up the webhook URL for Render
-    app = web.Application()
-    app.router.add_get('/', on_start)
-    app.router.add_post(f'/{API_TOKEN}', dp.handle_update)
-
-    # Run the bot with webhook
-    web.run_app(app, host="0.0.0.0", port=int(os.getenv('PORT', 3000)))
+if __name__ == "__main__":
+    threading.Thread(target=run_flask).start()
+    bot.run()
