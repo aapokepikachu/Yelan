@@ -75,10 +75,10 @@ async def about_command(client, message):
 async def request_command(client, message):
     user_id = message.from_user.id
     last_request = await db.requests.find_one({"user_id": user_id})
-    
+
     if last_request and datetime.utcnow() - last_request["timestamp"] < timedelta(hours=24):
         return await message.reply_text("You can only send one request every 24 hours.")
-    
+
     await message.reply_text("Which ROM are you requesting? Send your request or use /cancel.")
     await db.requests.update_one({"user_id": user_id}, {"$set": {"status": "waiting"}}, upsert=True)
 
@@ -86,7 +86,7 @@ async def request_command(client, message):
 async def receive_request(client, message):
     user_id = message.from_user.id
     request_entry = await db.requests.find_one({"user_id": user_id, "status": "waiting"})
-    
+
     if request_entry:
         request_id = request_entry.get("request_id", await db.requests.count_documents({}) + 1)
         await db.requests.update_one({"user_id": user_id}, {"$set": {
@@ -95,10 +95,10 @@ async def receive_request(client, message):
             "timestamp": datetime.utcnow(),
             "status": "pending"
         }})
-        
+
         request_details = f"**New ROM Request:**\nRequest ID: {request_id}\nUser: {message.from_user.username or 'No Username'}\nUser ID: {user_id}\nRequest: {message.text}"
         await client.send_message(GROUP_ID, request_details)
-        
+
         await message.reply_text(f"Your request has been sent to the Admins. Request ID: {request_id}")
 
 @bot.on_message(filters.command("cancel"))
@@ -111,7 +111,7 @@ async def cancel_request(client, message):
 async def track_request(client, message):
     user_id = message.from_user.id
     request = await db.requests.find_one({"user_id": user_id})
-    
+
     if not request:
         await message.reply_text("No request sent.")
     else:
@@ -129,20 +129,25 @@ async def ping_command(client, message):
 async def mark_done(client, message):
     if not is_admin(message.from_user.id):
         return await message.reply_text("You are not authorized to use this command.")
-    
+
+    if len(message.command) < 2:
+        return await message.reply_text("Please provide a request ID.")
+
     request_id = int(message.command[1])
     request = await db.requests.find_one({"request_id": request_id})
-    
+
     if request:
         await db.requests.update_one({"request_id": request_id}, {"$set": {"status": "Completed ✅"}})
         await client.send_message(request["user_id"], "Your request has been completed ✅")
         await message.reply_text("Marked as completed.")
+    else:
+        await message.reply_text("Request ID not found.")
 
 @bot.on_message(filters.command("send"))
 async def send_message(client, message):
     if not is_admin(message.from_user.id) or not message.reply_to_message:
         return await message.reply_text("Reply to a message and use /send <telegram_id>")
-    
+
     user_id = int(message.command[1])
     await client.send_message(user_id, message.reply_to_message.text)
     await message.reply_text("Message sent.")
@@ -156,7 +161,8 @@ async def broadcast(client, message):
     for user in users:
         try:
             await client.send_message(user, message.reply_to_message.text)
-        except:
+        except Exception as e:
+            print(f"Failed to send message to {user}: {e}")
             pass
     await message.reply_text(f"Broadcast sent to {len(users)} users.")
 
